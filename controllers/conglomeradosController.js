@@ -2,12 +2,38 @@
 import ConglomeradosModel from '../models/conglomeradosModel.js';
 import { generateConglomeradoCode, generateRandomCoordinates } from '../utils/generateCode.js';
 import axios from 'axios';
+
 class ConglomeradosController {
   
+  // 🆕 MODIFICADO: Ahora soporta paginación y búsqueda
   static async getAll(req, res) {
     try {
-      const conglomerados = await ConglomeradosModel.getAll();
-      res.json(conglomerados);
+      // Extraer parámetros de query
+      const { 
+        page = 1, 
+        limit = 20, 
+        busqueda = '' 
+      } = req.query;
+
+      // Convertir a números
+      const pageNum = parseInt(page);
+      const limitNum = parseInt(limit);
+
+      // Validar límites
+      if (pageNum < 1 || limitNum < 1 || limitNum > 100) {
+        return res.status(400).json({ 
+          error: 'Parámetros de paginación inválidos' 
+        });
+      }
+
+      // Llamar al model con paginación
+      const resultado = await ConglomeradosModel.getAllPaginado(
+        pageNum, 
+        limitNum, 
+        busqueda
+      );
+
+      res.json(resultado);
     } catch (error) {
       console.error('Error en getAll:', error);
       res.status(500).json({ error: error.message });
@@ -133,123 +159,140 @@ class ConglomeradosController {
     }
   }
 
+  // 🆕 MODIFICADO: Ahora soporta paginación y búsqueda por estado
   static async getByEstado(req, res) {
     try {
       const { estado } = req.params;
+      const { 
+        page = 1, 
+        limit = 20, 
+        busqueda = '' 
+      } = req.query;
       
       const estadosValidos = ['en_revision', 'aprobado', 'rechazado_temporal', 'rechazado_permanente'];
       if (!estadosValidos.includes(estado)) {
         return res.status(400).json({ error: 'Estado inválido' });
       }
+
+      const pageNum = parseInt(page);
+      const limitNum = parseInt(limit);
+
+      if (pageNum < 1 || limitNum < 1 || limitNum > 100) {
+        return res.status(400).json({ 
+          error: 'Parámetros de paginación inválidos' 
+        });
+      }
       
-      const conglomerados = await ConglomeradosModel.getByEstado(estado);
-      res.json(conglomerados);
+      const resultado = await ConglomeradosModel.getByEstadoPaginado(
+        estado, 
+        pageNum, 
+        limitNum, 
+        busqueda
+      );
+      
+      res.json(resultado);
     } catch (error) {
       console.error('Error en getByEstado:', error);
       res.status(500).json({ error: error.message });
     }
   }
 
-static async aprobar(req, res) {
-  try {
-    const { id } = req.params;
-    const { admin_id, admin_nombre, admin_email } = req.body; // ← NUEVO
-    
-    // Validar que vienen los datos del admin
-    if (!admin_id || !admin_nombre || !admin_email) {
-      return res.status(400).json({ 
-        error: 'Datos del admin son requeridos (admin_id, admin_nombre, admin_email)' 
-      });
-    }
-    
-    const existe = await ConglomeradosModel.getById(id);
-    if (!existe) {
-      return res.status(404).json({ error: 'Conglomerado no encontrado' });
-    }
+  static async aprobar(req, res) {
+    try {
+      const { id } = req.params;
+      const { admin_id, admin_nombre, admin_email } = req.body;
+      
+      if (!admin_id || !admin_nombre || !admin_email) {
+        return res.status(400).json({ 
+          error: 'Datos del admin son requeridos (admin_id, admin_nombre, admin_email)' 
+        });
+      }
+      
+      const existe = await ConglomeradosModel.getById(id);
+      if (!existe) {
+        return res.status(404).json({ error: 'Conglomerado no encontrado' });
+      }
 
-    if (existe.estado !== 'en_revision') {
-      return res.status(400).json({ 
-        error: 'Solo se pueden aprobar conglomerados en revisión',
-        estado_actual: existe.estado
-      });
-    }
+      if (existe.estado !== 'en_revision') {
+        return res.status(400).json({ 
+          error: 'Solo se pueden aprobar conglomerados en revisión',
+          estado_actual: existe.estado
+        });
+      }
 
-    // Pasar datos del admin al model
-    const conglomerado = await ConglomeradosModel.aprobar(
-      id, 
-      admin_id, 
-      admin_nombre, 
-      admin_email
-    );
-    
-    res.json({ 
-      message: 'Conglomerado aprobado exitosamente',
-      conglomerado 
-    });
-  } catch (error) {
-    console.error('Error en aprobar:', error);
-    res.status(500).json({ error: error.message });
+      const conglomerado = await ConglomeradosModel.aprobar(
+        id, 
+        admin_id, 
+        admin_nombre, 
+        admin_email
+      );
+      
+      res.json({ 
+        message: 'Conglomerado aprobado exitosamente',
+        conglomerado 
+      });
+    } catch (error) {
+      console.error('Error en aprobar:', error);
+      res.status(500).json({ error: error.message });
+    }
   }
-}
 
+  static async rechazar(req, res) {
+    try {
+      const { id } = req.params;
+      const { tipo, razon, fecha_proxima_revision, admin_id, admin_nombre, admin_email } = req.body;
+      
+      if (!tipo || !['temporal', 'permanente'].includes(tipo)) {
+        return res.status(400).json({ 
+          error: 'Tipo de rechazo debe ser "temporal" o "permanente"' 
+        });
+      }
 
-static async rechazar(req, res) {
-  try {
-    const { id } = req.params;
-    const { tipo, razon, fecha_proxima_revision, admin_id, admin_nombre, admin_email } = req.body; // ← NUEVO
-    
-    if (!tipo || !['temporal', 'permanente'].includes(tipo)) {
-      return res.status(400).json({ 
-        error: 'Tipo de rechazo debe ser "temporal" o "permanente"' 
+      if (!razon || razon.trim() === '') {
+        return res.status(400).json({ error: 'Razón de rechazo requerida' });
+      }
+
+      if (tipo === 'temporal' && !fecha_proxima_revision) {
+        return res.status(400).json({ 
+          error: 'fecha_proxima_revision requerida para rechazo temporal' 
+        });
+      }
+
+      if (!admin_id || !admin_nombre || !admin_email) {
+        return res.status(400).json({ 
+          error: 'Datos del admin son requeridos' 
+        });
+      }
+
+      const existe = await ConglomeradosModel.getById(id);
+      if (!existe) {
+        return res.status(404).json({ error: 'Conglomerado no encontrado' });
+      }
+
+      const nuevoEstado = tipo === 'temporal' 
+        ? 'rechazado_temporal' 
+        : 'rechazado_permanente';
+
+      const conglomerado = await ConglomeradosModel.rechazar(
+        id, 
+        nuevoEstado, 
+        razon,
+        tipo === 'temporal' ? fecha_proxima_revision : null,
+        admin_id,
+        admin_nombre,
+        admin_email
+      );
+
+      res.json({ 
+        message: `Conglomerado rechazado ${tipo === 'temporal' ? 'temporalmente' : 'permanentemente'}`,
+        conglomerado 
       });
+    } catch (error) {
+      console.error('Error en rechazar:', error);
+      res.status(500).json({ error: error.message });
     }
-
-    if (!razon || razon.trim() === '') {
-      return res.status(400).json({ error: 'Razón de rechazo requerida' });
-    }
-
-    if (tipo === 'temporal' && !fecha_proxima_revision) {
-      return res.status(400).json({ 
-        error: 'fecha_proxima_revision requerida para rechazo temporal' 
-      });
-    }
-
-    // Validar datos del admin
-    if (!admin_id || !admin_nombre || !admin_email) {
-      return res.status(400).json({ 
-        error: 'Datos del admin son requeridos' 
-      });
-    }
-
-    const existe = await ConglomeradosModel.getById(id);
-    if (!existe) {
-      return res.status(404).json({ error: 'Conglomerado no encontrado' });
-    }
-
-    const nuevoEstado = tipo === 'temporal' 
-      ? 'rechazado_temporal' 
-      : 'rechazado_permanente';
-
-    // Pasar datos del admin al model
-    const conglomerado = await ConglomeradosModel.rechazar(
-      id, 
-      nuevoEstado, 
-      razon,
-      tipo === 'temporal' ? fecha_proxima_revision : null,
-      admin_id,
-      admin_nombre,
-      admin_email
-    );
-
-    res.json({ 
-      message: `Conglomerado rechazado ${tipo === 'temporal' ? 'temporalmente' : 'permanentemente'}`,
-      conglomerado 
-    });
-  } catch (error) {
-    console.error('Error en rechazar:', error);
-    res.status(500).json({ error: error.message });
   }
-}
+
   static async getPendientesRevision(req, res) {
     try {
       const conglomerados = await ConglomeradosModel.getPendientesRevision();
@@ -259,53 +302,54 @@ static async rechazar(req, res) {
       res.status(500).json({ error: error.message });
     }
   }
-  static async obtenerClima(req, res) {
-  try {
-    const { lat, lon } = req.query;
-    
-    if (!lat || !lon) {
-      return res.status(400).json({ error: 'Parámetros lat y lon requeridos' });
-    }
 
-    const apiKey = process.env.OPENWEATHER_API_KEY;
-    
-    if (!apiKey) {
-      console.error('❌ OPENWEATHER_API_KEY no configurada en .env');
-      return res.status(500).json({ 
-        error: 'Configuración del servidor incompleta',
-        debug: 'OPENWEATHER_API_KEY no configurada'
+  static async obtenerClima(req, res) {
+    try {
+      const { lat, lon } = req.query;
+      
+      if (!lat || !lon) {
+        return res.status(400).json({ error: 'Parámetros lat y lon requeridos' });
+      }
+
+      const apiKey = process.env.OPENWEATHER_API_KEY;
+      
+      if (!apiKey) {
+        console.error('❌ OPENWEATHER_API_KEY no configurada en .env');
+        return res.status(500).json({ 
+          error: 'Configuración del servidor incompleta',
+          debug: 'OPENWEATHER_API_KEY no configurada'
+        });
+      }
+
+      console.log(`🌤️ Obteniendo clima para: ${lat}, ${lon}`);
+
+      const [current, forecast] = await Promise.all([
+        axios.get(
+          `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=es`
+        ),
+        axios.get(
+          `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=es`
+        )
+      ]);
+
+      const dailyForecast = forecast.data.list
+        .filter(item => item.dt_txt.includes('12:00:00'))
+        .slice(0, 5);
+
+      console.log('✅ Clima obtenido exitosamente');
+
+      res.json({
+        current: current.data,
+        forecast: dailyForecast
+      });
+    } catch (error) {
+      console.error('❌ Error en obtenerClima:', error.message);
+      res.status(500).json({ 
+        error: 'Error al obtener datos climáticos',
+        details: error.message 
       });
     }
-
-    console.log(`🌤️ Obteniendo clima para: ${lat}, ${lon}`);
-
-    const [current, forecast] = await Promise.all([
-      axios.get(
-        `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=es`
-      ),
-      axios.get(
-        `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=es`
-      )
-    ]);
-
-    const dailyForecast = forecast.data.list
-      .filter(item => item.dt_txt.includes('12:00:00'))
-      .slice(0, 5);
-
-    console.log('✅ Clima obtenido exitosamente');
-
-    res.json({
-      current: current.data,
-      forecast: dailyForecast
-    });
-  } catch (error) {
-    console.error('❌ Error en obtenerClima:', error.message);
-    res.status(500).json({ 
-      error: 'Error al obtener datos climáticos',
-      details: error.message 
-    });
   }
-}
 }
 
 export default ConglomeradosController;
