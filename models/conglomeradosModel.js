@@ -13,21 +13,17 @@ class ConglomeradosModel {
     return data || [];
   }
 
-  // 🆕 NUEVO: Obtener todos con paginación
   static async getAllPaginado(page = 1, limit = 20, busqueda = '') {
     const offset = (page - 1) * limit;
     
-    // Construir query base
     let query = supabase
       .from('conglomerados')
       .select('*', { count: 'exact' });
     
-    // Aplicar búsqueda si existe
     if (busqueda && busqueda.trim() !== '') {
-      query = query.or(`codigo.ilike.%${busqueda}%,municipio.ilike.%${busqueda}%`);
+      query = query.ilike('codigo', `%${busqueda}%`);
     }
     
-    // Aplicar paginación y ordenamiento
     const { data, error, count } = await query
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
@@ -72,8 +68,7 @@ class ConglomeradosModel {
         codigo: conglomerado.codigo,
         latitud: conglomerado.latitud,
         longitud: conglomerado.longitud,
-        estado: 'en_revision',
-        municipio: conglomerado.municipio || null,
+        estado: conglomerado.estado || 'sin_asignar',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }])
@@ -82,6 +77,36 @@ class ConglomeradosModel {
     
     if (error) throw error;
     return data;
+  }
+
+  // 🆕 NUEVO: Crear múltiples conglomerados
+  static async createBatch(conglomerados) {
+    const records = conglomerados.map(c => ({
+      codigo: c.codigo,
+      latitud: c.latitud,
+      longitud: c.longitud,
+      estado: c.estado || 'sin_asignar',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }));
+
+    const { data, error } = await supabase
+      .from('conglomerados')
+      .insert(records)
+      .select();
+    
+    if (error) throw error;
+    return data || [];
+  }
+
+  // 🆕 NUEVO: Tomar conglomerado sin asignar (usando función PL/pgSQL)
+  static async tomarSinAsignar(coord_id) {
+    const { data, error } = await supabase.rpc('tomar_conglomerado_sin_asignar', {
+      p_coord_id: coord_id
+    });
+
+    if (error) throw error;
+    return data?.[0] || null;
   }
 
   static async update(id, updates) {
@@ -109,16 +134,18 @@ class ConglomeradosModel {
     return true;
   }
 
-  static async aprobar(id, admin_id, admin_nombre, admin_email) {
+  // ✅ MODIFICADO: Aprobar con ubicación completa
+  static async aprobar(id, coord_id, municipio_id, departamento_id, region_id) {
     const { data, error } = await supabase
       .from('conglomerados')
       .update({ 
         estado: 'aprobado',
+        municipio_id,
+        departamento_id,
+        region_id,
         razon_rechazo: null,
         fecha_proxima_revision: null,
-        modificado_por_admin_id: admin_id,
-        modificado_por_admin_nombre: admin_nombre,
-        modificado_por_admin_email: admin_email,
+        modificado_por_admin_id: coord_id,
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
@@ -129,14 +156,13 @@ class ConglomeradosModel {
     return data;
   }
 
-  static async rechazar(id, nuevoEstado, razon, fechaRevision, admin_id, admin_nombre, admin_email) {
+  // ✅ MODIFICADO: Rechazar simplificado
+  static async rechazar(id, nuevoEstado, razon, fechaRevision, coord_id) {
     const updates = {
       estado: nuevoEstado,
       razon_rechazo: razon,
       fecha_proxima_revision: fechaRevision,
-      modificado_por_admin_id: admin_id,
-      modificado_por_admin_nombre: admin_nombre,
-      modificado_por_admin_email: admin_email,
+      modificado_por_admin_id: coord_id,
       updated_at: new Date().toISOString()
     };
 
@@ -162,7 +188,6 @@ class ConglomeradosModel {
     return data || [];
   }
 
-  // 🆕 NUEVO: Obtener por estado con paginación
   static async getByEstadoPaginado(estado, page = 1, limit = 20, busqueda = '') {
     const offset = (page - 1) * limit;
     
@@ -171,9 +196,8 @@ class ConglomeradosModel {
       .select('*', { count: 'exact' })
       .eq('estado', estado);
     
-    // Aplicar búsqueda si existe
     if (busqueda && busqueda.trim() !== '') {
-      query = query.or(`codigo.ilike.%${busqueda}%,municipio.ilike.%${busqueda}%`);
+      query = query.ilike('codigo', `%${busqueda}%`);
     }
     
     const { data, error, count } = await query
@@ -191,38 +215,6 @@ class ConglomeradosModel {
     };
   }
 
-  static async cambiarEstado(id, nuevoEstado, razon = null, fechaRevision = null) {
-    const updates = {
-      estado: nuevoEstado,
-      updated_at: new Date().toISOString()
-    };
-
-    if (nuevoEstado === 'aprobado') {
-      updates.razon_rechazo = null;
-      updates.fecha_proxima_revision = null;
-    } else {
-      if (razon) {
-        updates.razon_rechazo = razon;
-      }
-
-      if (fechaRevision) {
-        updates.fecha_proxima_revision = fechaRevision;
-      } else if (nuevoEstado === 'rechazado_permanente') {
-        updates.fecha_proxima_revision = null;
-      }
-    }
-
-    const { data, error } = await supabase
-      .from('conglomerados')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
-  }
-
   static async getPendientesRevision() {
     const hoy = new Date().toISOString().split('T')[0];
     
@@ -234,6 +226,75 @@ class ConglomeradosModel {
     
     if (error) throw error;
     return data || [];
+  }
+
+  // 🆕 NUEVO: Contar por estado
+  static async contarPorEstado(estado) {
+    const { count, error } = await supabase
+      .from('conglomerados')
+      .select('*', { count: 'exact', head: true })
+      .eq('estado', estado);
+    
+    if (error) throw error;
+    return count || 0;
+  }
+
+  // 🆕 NUEVO: Obtener por departamento (para coordinadores de brigadas)
+  static async getByDepartamento(departamento_id, estado = 'aprobado') {
+    const { data, error } = await supabase
+      .from('conglomerados')
+      .select('*')
+      .eq('departamento_id', departamento_id)
+      .eq('estado', estado)
+      .eq('tiene_brigada', false)
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  }
+
+  // 🆕 NUEVO: Obtener por municipio (prioridad para coordinadores de municipio)
+  static async getByMunicipio(municipio_id, estado = 'aprobado') {
+    const { data, error } = await supabase
+      .from('conglomerados')
+      .select('*')
+      .eq('municipio_id', municipio_id)
+      .eq('estado', estado)
+      .eq('tiene_brigada', false)
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  }
+
+  // 🆕 NUEVO: Marcar como con brigada
+  static async marcarConBrigada(id) {
+    const { data, error } = await supabase
+      .from('conglomerados')
+      .update({ 
+        tiene_brigada: true,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  }
+
+  // 🆕 NUEVO: Estadísticas
+  static async getEstadisticas() {
+    const estados = ['sin_asignar', 'en_revision', 'aprobado', 'rechazado_temporal', 'rechazado_permanente'];
+    const estadisticas = {};
+
+    for (const estado of estados) {
+      estadisticas[estado] = await this.contarPorEstado(estado);
+    }
+
+    estadisticas.total = Object.values(estadisticas).reduce((a, b) => a + b, 0);
+
+    return estadisticas;
   }
 }
 

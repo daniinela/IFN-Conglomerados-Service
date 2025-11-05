@@ -5,18 +5,38 @@ import { verificarToken, verificarAdmin } from '../middleware/authMiddleware.js'
 
 const router = express.Router();
 
-// Rutas PROTEGIDAS (cualquier usuario autenticado puede ver)
-router.get('/', verificarToken, ConglomeradosController.getAll);
-router.get('/:id', verificarToken, ConglomeradosController.getById);
-router.get('/estado/:estado', verificarToken, ConglomeradosController.getByEstado);
-router.get('/pendientes-revision', verificarToken, ConglomeradosController.getPendientesRevision);
+// ============================================
+// RUTAS PÚBLICAS (sin token) - para clima
+// ============================================
 router.get('/clima/obtener', ConglomeradosController.obtenerClima);
 
-// Rutas SOLO ADMIN
-router.post('/generar', verificarToken, verificarAdmin, ConglomeradosController.generate);
+// ============================================
+// RUTAS PROTEGIDAS (token requerido)
+// ============================================
+
+// Ver conglomerados
+router.get('/', verificarToken, ConglomeradosController.getAll);
+router.get('/estadisticas', verificarToken, ConglomeradosController.getEstadisticas);
+router.get('/estado/:estado', verificarToken, ConglomeradosController.getByEstado);
+router.get('/pendientes-revision', verificarToken, ConglomeradosController.getPendientesRevision);
+router.get('/:id', verificarToken, ConglomeradosController.getById);
+
+// ============================================
+// RUTAS SOLO ADMIN (verificarAdmin)
+// ============================================
+
+// Generar conglomerados
+router.post('/generar-batch', verificarToken, verificarAdmin, ConglomeradosController.generarBatch);
+
+// Tomar conglomerado para revisar
+router.post('/tomar-sin-asignar', verificarToken, verificarAdmin, ConglomeradosController.tomarSinAsignar);
+
+// Aprobar/Rechazar
+router.post('/:id/aprobar', verificarToken, verificarAdmin, ConglomeradosController.aprobar);
+router.post('/:id/rechazar', verificarToken, verificarAdmin, ConglomeradosController.rechazar);
+
+// CRUD básico
 router.put('/:id', verificarToken, verificarAdmin, ConglomeradosController.update);
-router.put('/:id/aprobar', verificarToken, verificarAdmin, ConglomeradosController.aprobar);
-router.put('/:id/rechazar', verificarToken, verificarAdmin, ConglomeradosController.rechazar);
 router.delete('/:id', verificarToken, verificarAdmin, ConglomeradosController.delete);
 
 export default router;
