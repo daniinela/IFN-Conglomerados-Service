@@ -5,17 +5,18 @@
 
 // conglomerados-service/middleware/authMiddleware.js
 import { createClient } from '@supabase/supabase-js';
+import axios from 'axios';
 
-// Usar las credenciales de AUTH (proyecto de usuarios)
 const supabaseUrl = process.env.SUPABASE_AUTH_URL;
 const supabaseKey = process.env.SUPABASE_AUTH_KEY;
 
-console.log('🔍 Verificando Supabase AUTH config:');
+console.log('🔍 Verificando Supabase AUTH config (conglomerados):');
 console.log('URL:', supabaseUrl ? '✅' : '❌');
 console.log('Key:', supabaseKey ? '✅' : '❌');
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// ✅ Verificar token JWT de Supabase
 export async function verificarToken(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
@@ -44,7 +45,6 @@ export async function verificarToken(req, res, next) {
     req.user = user;
     req.userId = user.id;
     req.userEmail = user.email;
-    req.userRole = user.user_metadata?.rol || null;
 
     next();
   } catch (error) {
@@ -53,30 +53,81 @@ export async function verificarToken(req, res, next) {
   }
 }
 
-export function verificarAdmin(req, res, next) {
-  if (!req.user) {
-    return res.status(401).json({ error: 'No autenticado' });
-  }
+// ✅ Verificar roles desde usuarios-service (más robusto)
+export async function verificarRol(rolesPermitidos = []) {
+  return async (req, res, next) => {
+    try {
+      const userId = req.user?.id;
 
-  if (req.userRole !== 'admin') {
-    return res.status(403).json({
-      error: 'Solo administradores pueden realizar esta acción'
-    });
-  }
+      if (!userId) {
+        return res.status(401).json({ error: 'Usuario no autenticado' });
+      }
 
-  next();
+      const token = req.headers.authorization;
+
+      // Consultar roles del usuario desde usuarios-service
+      const cuentasRolRes = await axios.get(
+        `${process.env.USUARIOS_SERVICE_URL}/api/cuentas-rol/usuario/${userId}`,
+        { 
+          headers: { Authorization: token },
+          timeout: 5000  // 5 segundos timeout
+        }
+      );
+
+      const cuentasRol = cuentasRolRes.data;
+      const rolesActivos = cuentasRol
+        .filter(cr => cr.activo)
+        .map(cr => cr.roles_sistema?.codigo)
+        .filter(Boolean);
+
+      // Verificar si tiene alguno de los roles permitidos
+      const tieneRol = rolesPermitidos.some(rol => rolesActivos.includes(rol));
+
+      if (!tieneRol) {
+        return res.status(403).json({
+          error: 'Acceso denegado',
+          mensaje: `Se requiere uno de estos roles: ${rolesPermitidos.join(', ')}`,
+          tus_roles: rolesActivos
+        });
+      }
+
+      // Adjuntar roles al request para uso posterior
+      req.userRoles = rolesActivos;
+      next();
+
+    } catch (error) {
+      console.error('❌ Error verificando roles:', error.message);
+
+      // Si usuarios-service no responde, denegar acceso
+      if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+        return res.status(503).json({
+          error: 'Servicio de autenticación no disponible',
+          detalles: 'No se pudo verificar permisos'
+        });
+      }
+
+      res.status(500).json({ 
+        error: 'Error al verificar permisos',
+        detalles: error.message 
+      });
+    }
+  };
 }
 
-export function verificarBrigadista(req, res, next) {
-  if (!req.user) {
-    return res.status(401).json({ error: 'No autenticado' });
-  }
+// ✅ Middleware simplificado para admins
+export async function verificarAdmin(req, res, next) {
+  const verificador = await verificarRol(['super_admin', 'coord_georef']);
+  return verificador(req, res, next);
+}
 
-  if (req.userRole !== 'brigadista' && req.userRole !== 'admin') {
-    return res.status(403).json({
-      error: 'Solo brigadistas pueden realizar esta acción'
-    });
-  }
+// ✅ Verificar coordinador de georreferenciación
+export async function verificarCoordGeoref(req, res, next) {
+  const verificador = await verificarRol(['super_admin', 'coord_georef']);
+  return verificador(req, res, next);
+}
 
-  next();
+// ✅ Verificar super admin exclusivo
+export async function verificarSuperAdmin(req, res, next) {
+  const verificador = await verificarRol(['super_admin']);
+  return verificador(req, res, next);
 }
