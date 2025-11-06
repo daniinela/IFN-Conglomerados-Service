@@ -5,38 +5,111 @@ import { verificarToken, verificarAdmin } from '../middleware/authMiddleware.js'
 
 const router = express.Router();
 
-// ============================================
-// RUTAS PÚBLICAS (sin token) - para clima
-// ============================================
 router.get('/clima/obtener', ConglomeradosController.obtenerClima);
 
-// ============================================
-// RUTAS PROTEGIDAS (token requerido)
-// ============================================
+//super admin papu
 
-// Ver conglomerados
-router.get('/', verificarToken, ConglomeradosController.getAll);
-router.get('/estadisticas', verificarToken, ConglomeradosController.getEstadisticas);
-router.get('/estado/:estado', verificarToken, ConglomeradosController.getByEstado);
-router.get('/pendientes-revision', verificarToken, ConglomeradosController.getPendientesRevision);
-router.get('/:id', verificarToken, ConglomeradosController.getById);
+// Generar batch inicial de 1500
+router.post('/generar-batch', 
+  verificarToken, 
+  verificarAdmin, 
+  ConglomeradosController.generarBatch
+);
 
-// ============================================
-// RUTAS SOLO ADMIN (verificarAdmin)
-// ============================================
+//  Asignar lote a coordinador
+router.post('/asignar-a-coordinador',
+  verificarToken,
+  verificarAdmin,
+  ConglomeradosController.asignarACoordinador
+);
 
-// Generar conglomerados
-router.post('/generar-batch', verificarToken, verificarAdmin, ConglomeradosController.generarBatch);
+//Ver conglomerados vencidos
+router.get('/vencidos',
+  verificarToken,
+  verificarAdmin,
+  ConglomeradosController.getVencidos
+);
 
-// Tomar conglomerado para revisar
-router.post('/tomar-sin-asignar', verificarToken, verificarAdmin, ConglomeradosController.tomarSinAsignar);
+//papu coordinador de georeferenciacion
 
-// Aprobar/Rechazar
-router.post('/:id/aprobar', verificarToken, verificarAdmin, ConglomeradosController.aprobar);
-router.post('/:id/rechazar', verificarToken, verificarAdmin, ConglomeradosController.rechazar);
+//  Ver mis conglomerados asignados
+router.get('/mis-asignados',
+  verificarToken,
+  ConglomeradosController.getMisAsignados
+);
 
-// CRUD básico
-router.put('/:id', verificarToken, verificarAdmin, ConglomeradosController.update);
-router.delete('/:id', verificarToken, verificarAdmin, ConglomeradosController.delete);
+// Aprobar conglomerado
+router.post('/:id/aprobar', 
+  verificarToken, 
+  ConglomeradosController.aprobar
+);
+
+// Rechazar conglomerado
+router.post('/:id/rechazar', 
+  verificarToken, 
+  ConglomeradosController.rechazar
+);
+
+
+
+//  Obtener por municipio
+router.get('/municipio/:municipio_id',
+  verificarToken,
+  ConglomeradosController.getByMunicipio
+);
+
+//  Obtener por departamento
+router.get('/departamento/:departamento_id',
+  verificarToken,
+  ConglomeradosController.getByDepartamento
+);
+
+//  Marcar como con brigada
+router.put('/:id/marcar-con-brigada',
+  verificarToken,
+  ConglomeradosController.marcarConBrigada
+);
+
+// ===============================
+// CONSULTAS GENERALES
+// ===============================
+
+// Listar todos (paginado)
+router.get('/', 
+  verificarToken, 
+  ConglomeradosController.getAll
+);
+
+// Estadísticas
+router.get('/estadisticas', 
+  verificarToken, 
+  ConglomeradosController.getEstadisticas
+);
+
+// Filtrar por estado
+router.get('/estado/:estado', 
+  verificarToken, 
+  ConglomeradosController.getByEstado
+);
+
+// Ver uno específico
+router.get('/:id', 
+  verificarToken, 
+  ConglomeradosController.getById
+);
+
+//el crud basico
+
+router.put('/:id', 
+  verificarToken, 
+  verificarAdmin, 
+  ConglomeradosController.update
+);
+
+router.delete('/:id', 
+  verificarToken, 
+  verificarAdmin, 
+  ConglomeradosController.delete
+);
 
 export default router;

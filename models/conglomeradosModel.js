@@ -79,7 +79,7 @@ class ConglomeradosModel {
     return data;
   }
 
-  // 🆕 NUEVO: Crear múltiples conglomerados
+  // Crear múltiples conglomerados
   static async createBatch(conglomerados) {
     const records = conglomerados.map(c => ({
       codigo: c.codigo,
@@ -99,14 +99,16 @@ class ConglomeradosModel {
     return data || [];
   }
 
-  // 🆕 NUEVO: Tomar conglomerado sin asignar (usando función PL/pgSQL)
-  static async tomarSinAsignar(coord_id) {
-    const { data, error } = await supabase.rpc('tomar_conglomerado_sin_asignar', {
-      p_coord_id: coord_id
+  // ✅ NUEVO: Asignar lote a coordinador (usa función PL/pgSQL)
+  static async asignarLote(coord_id, cantidad, plazo_dias) {
+    const { data, error } = await supabase.rpc('asignar_lote_conglomerados', {
+      p_coord_id: coord_id,
+      p_cantidad: cantidad,
+      p_plazo_dias: plazo_dias
     });
-
+    
     if (error) throw error;
-    return data?.[0] || null;
+    return data || [];
   }
 
   static async update(id, updates) {
@@ -134,7 +136,7 @@ class ConglomeradosModel {
     return true;
   }
 
-  // ✅ MODIFICADO: Aprobar con ubicación completa
+  // ✅ CORREGIDO: Aprobar con ubicación + asignación automática a coord_brigadas
   static async aprobar(id, coord_id, municipio_id, departamento_id, region_id) {
     const { data, error } = await supabase
       .from('conglomerados')
@@ -143,8 +145,7 @@ class ConglomeradosModel {
         municipio_id,
         departamento_id,
         region_id,
-        razon_rechazo: null,
-        fecha_proxima_revision: null,
+        razon_rechazo: null,  // Limpiar rechazo
         modificado_por_admin_id: coord_id,
         updated_at: new Date().toISOString()
       })
@@ -156,19 +157,16 @@ class ConglomeradosModel {
     return data;
   }
 
-  // ✅ MODIFICADO: Rechazar simplificado
-  static async rechazar(id, nuevoEstado, razon, fechaRevision, coord_id) {
-    const updates = {
-      estado: nuevoEstado,
-      razon_rechazo: razon,
-      fecha_proxima_revision: fechaRevision,
-      modificado_por_admin_id: coord_id,
-      updated_at: new Date().toISOString()
-    };
-
+  // ✅ CORREGIDO: Rechazar sin fecha_proxima_revision
+  static async rechazar(id, razon, coord_id) {
     const { data, error } = await supabase
       .from('conglomerados')
-      .update(updates)
+      .update({
+        estado: 'rechazado_permanente',  // ✅ Solo permanente
+        razon_rechazo: razon,
+        modificado_por_admin_id: coord_id,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', id)
       .select()
       .single();
@@ -215,20 +213,43 @@ class ConglomeradosModel {
     };
   }
 
-  static async getPendientesRevision() {
-    const hoy = new Date().toISOString().split('T')[0];
+  // ✅ NUEVO: Obtener conglomerados de un coordinador
+  static async getByCoordinadorPaginado(coord_id, page = 1, limit = 20) {
+    const offset = (page - 1) * limit;
     
+    const { data, error, count } = await supabase
+      .from('conglomerados')
+      .select('*', { count: 'exact' })
+      .eq('revisado_por_coord_id', coord_id)
+      .eq('estado', 'en_revision')
+      .order('fecha_asignacion', { ascending: true })
+      .range(offset, offset + limit - 1);
+    
+    if (error) throw error;
+    
+    return {
+      data: data || [],
+      total: count || 0,
+      page,
+      limit,
+      totalPages: Math.ceil((count || 0) / limit)
+    };
+  }
+
+  // ✅ NUEVO: Conglomerados vencidos (para super_admin)
+  static async getVencidos() {
     const { data, error } = await supabase
       .from('conglomerados')
       .select('*')
-      .eq('estado', 'rechazado_temporal')
-      .lte('fecha_proxima_revision', hoy);
+      .eq('estado', 'en_revision')
+      .lt('fecha_limite_revision', new Date().toISOString())
+      .order('fecha_limite_revision', { ascending: true });
     
     if (error) throw error;
     return data || [];
   }
 
-  // 🆕 NUEVO: Contar por estado
+  // Contar por estado
   static async contarPorEstado(estado) {
     const { count, error } = await supabase
       .from('conglomerados')
@@ -239,7 +260,7 @@ class ConglomeradosModel {
     return count || 0;
   }
 
-  // 🆕 NUEVO: Obtener por departamento (para coordinadores de brigadas)
+  // ✅ NUEVO: Obtener por departamento (para coord_brigadas)
   static async getByDepartamento(departamento_id, estado = 'aprobado') {
     const { data, error } = await supabase
       .from('conglomerados')
@@ -253,7 +274,7 @@ class ConglomeradosModel {
     return data || [];
   }
 
-  // 🆕 NUEVO: Obtener por municipio (prioridad para coordinadores de municipio)
+  // ✅ NUEVO: Obtener por municipio (prioridad para coord de municipio)
   static async getByMunicipio(municipio_id, estado = 'aprobado') {
     const { data, error } = await supabase
       .from('conglomerados')
@@ -267,7 +288,37 @@ class ConglomeradosModel {
     return data || [];
   }
 
-  // 🆕 NUEVO: Marcar como con brigada
+  // ✅ NUEVO: Obtener por asignación a coord_brigadas
+  static async getByCoordBrigadas(coord_brigadas_id) {
+    const { data, error } = await supabase
+      .from('conglomerados')
+      .select('*')
+      .eq('asignado_coord_brigadas_id', coord_brigadas_id)
+      .eq('estado', 'aprobado')
+      .order('fecha_asignacion_brigadas', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  }
+
+  // ✅ NUEVO: Asignar a coordinador de brigadas
+  static async asignarACoordBrigadas(id, coord_brigadas_id) {
+    const { data, error } = await supabase
+      .from('conglomerados')
+      .update({
+        asignado_coord_brigadas_id: coord_brigadas_id,
+        fecha_asignacion_brigadas: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  }
+
+  // Marcar como con brigada
   static async marcarConBrigada(id) {
     const { data, error } = await supabase
       .from('conglomerados')
@@ -283,9 +334,9 @@ class ConglomeradosModel {
     return data;
   }
 
-  // 🆕 NUEVO: Estadísticas
+  // Estadísticas
   static async getEstadisticas() {
-    const estados = ['sin_asignar', 'en_revision', 'aprobado', 'rechazado_temporal', 'rechazado_permanente'];
+    const estados = ['sin_asignar', 'en_revision', 'aprobado', 'rechazado_permanente'];
     const estadisticas = {};
 
     for (const estado of estados) {
@@ -293,6 +344,10 @@ class ConglomeradosModel {
     }
 
     estadisticas.total = Object.values(estadisticas).reduce((a, b) => a + b, 0);
+
+    // ✅ Agregar vencidos
+    const vencidos = await this.getVencidos();
+    estadisticas.vencidos = vencidos.length;
 
     return estadisticas;
   }
