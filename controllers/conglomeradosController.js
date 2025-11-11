@@ -6,10 +6,22 @@ import axios from 'axios';
 
 class ConglomeradosController {
   
-  static async getAll(req, res) {
+   static async getAll(req, res) {
     try {
-      const { page = 1, limit = 20, busqueda = '' } = req.query;
-      const pageNum = parseInt(page);
+      const { 
+        page = 1, 
+        limit = 20, 
+        busqueda = '',
+        offset 
+      } = req.query;
+
+      let pageNum = parseInt(page);
+      if (offset !== undefined) {
+        const offsetNum = parseInt(offset);
+        const limitNum = parseInt(limit);
+        pageNum = Math.floor(offsetNum / limitNum) + 1;
+      }
+
       const limitNum = parseInt(limit);
 
       if (pageNum < 1 || limitNum < 1 || limitNum > 100) {
@@ -18,11 +30,54 @@ class ConglomeradosController {
         });
       }
 
+      const super_admin_id = req.user?.id;
+      const es_super_admin = req.user?.roles?.some(r => 
+        r.codigo === 'super_admin'
+      );
+
       const resultado = await ConglomeradosModel.getAllPaginado(
         pageNum, 
         limitNum, 
-        busqueda
+        busqueda,
+        es_super_admin ? super_admin_id : null
       );
+
+      // ✅ OPCIÓN C: Enriquecer con nombres de admins (OPCIONAL)
+      if (resultado.data.length > 0) {
+        try {
+          const token = req.headers.authorization;
+          const adminIds = [...new Set(
+            resultado.data
+              .map(c => c.generado_por_admin_id)
+              .filter(Boolean)
+          )];
+
+          if (adminIds.length > 0) {
+            const usuariosRes = await axios.post(
+              `${process.env.USUARIOS_SERVICE_URL}/api/usuarios/bulk`,
+              { ids: adminIds },
+              { headers: { Authorization: token } }
+            );
+
+            const usuariosMap = {};
+            (usuariosRes.data || []).forEach(u => {
+              usuariosMap[u.id] = {
+                nombre: u.nombre_completo,
+                email: u.email
+              };
+            });
+
+            resultado.data = resultado.data.map(c => ({
+              ...c,
+              generado_por_nombre: usuariosMap[c.generado_por_admin_id]?.nombre || 'N/A',
+              generado_por_email: usuariosMap[c.generado_por_admin_id]?.email || ''
+            }));
+          }
+        } catch (err) {
+          console.error('⚠️ Error obteniendo nombres de admins:', err.message);
+          // Continuar sin nombres (no es crítico)
+        }
+      }
 
       res.json(resultado);
     } catch (error) {
@@ -50,6 +105,11 @@ class ConglomeradosController {
   static async generarBatch(req, res) {
     try {
       const { cantidad = 1500 } = req.body;
+      const super_admin_id = req.user?.id;
+
+      if (!super_admin_id) {
+        return res.status(401).json({ error: 'Usuario no autenticado' });
+      }
       
       if (cantidad < 1 || cantidad > 2000) {
         return res.status(400).json({ 
@@ -57,14 +117,26 @@ class ConglomeradosController {
         });
       }
 
-      console.log(`🔄 Generando ${cantidad} conglomerados...`);
+      // Validar que no existan demasiados activos
+      const totalActivos = await ConglomeradosModel.contarTotal();
+
+      if (totalActivos >= 1500) {
+        return res.status(400).json({ 
+          error: 'Ya se generaron los 1500 conglomerados del proyecto',
+          total_activos: totalActivos
+        });
+      }
+
+      const cantidadPermitida = Math.min(cantidad, 1500 - totalActivos);
+      
+      console.log(`🔄 Generando ${cantidadPermitida} conglomerados...`);
 
       const conglomeradosGenerados = [];
       const loteSize = 100;
 
-      for (let i = 0; i < cantidad; i += loteSize) {
+      for (let i = 0; i < cantidadPermitida; i += loteSize) {
         const lote = [];
-        const cantidadLote = Math.min(loteSize, cantidad - i);
+        const cantidadLote = Math.min(loteSize, cantidadPermitida - i);
 
         for (let j = 0; j < cantidadLote; j++) {
           let codigoUnico = false;
@@ -83,21 +155,22 @@ class ConglomeradosController {
             codigo,
             latitud: coordenadas.latitud,
             longitud: coordenadas.longitud,
-            estado: 'sin_asignar'
+            estado: 'sin_asignar',
+            generado_por_admin_id: super_admin_id // ✅ NUEVO
           });
         }
 
         const insertados = await ConglomeradosModel.createBatch(lote);
         conglomeradosGenerados.push(...insertados);
 
-        console.log(`✅ Lote ${Math.floor(i / loteSize) + 1}: ${insertados.length} conglomerados`);
+        console.log(`✅ Lote ${Math.floor(i / loteSize) + 1}: ${insertados.length}`);
       }
-
-      console.log(`✅ Total generados: ${conglomeradosGenerados.length}`);
 
       res.status(201).json({
         message: `${conglomeradosGenerados.length} conglomerados generados exitosamente`,
-        total: conglomeradosGenerados.length
+        total: conglomeradosGenerados.length,
+        total_sistema: totalActivos + conglomeradosGenerados.length,
+        restantes_para_1500: 1500 - (totalActivos + conglomeradosGenerados.length)
       });
     } catch (error) {
       console.error('Error en generarBatch:', error);
@@ -105,7 +178,79 @@ class ConglomeradosController {
     }
   }
 
-  // ✅ NUEVO: Asignar lote a coordinador (CON VALIDACIÓN ANTI-AUTO-ASIGNACIÓN)
+    static async darDeBaja(req, res) {
+    try {
+      const { id } = req.params;
+      const { motivo } = req.body;
+      const admin_id = req.user?.id;
+      
+      if (!admin_id) {
+        return res.status(401).json({ error: 'Usuario no autenticado' });
+      }
+
+      if (!motivo || motivo.trim() === '') {
+        return res.status(400).json({ error: 'Motivo de baja requerido' });
+      }
+      
+      const conglomerado = await ConglomeradosModel.getById(id);
+      
+      if (!conglomerado) {
+        return res.status(404).json({ error: 'Conglomerado no encontrado' });
+      }
+
+      // Solo se pueden dar de baja los rechazados permanentemente
+      if (conglomerado.estado !== 'rechazado_permanente') {
+        return res.status(400).json({ 
+          error: 'Solo se pueden dar de baja conglomerados rechazados permanentemente',
+          estado_actual: conglomerado.estado
+        });
+      }
+      
+      const resultado = await ConglomeradosModel.darDeBaja(id, motivo, admin_id);
+      
+      res.json({ 
+        message: 'Conglomerado dado de baja exitosamente',
+        conglomerado: resultado
+      });
+    } catch (error) {
+      console.error('Error en darDeBaja:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+  static async reactivar(req, res) {
+    try {
+      const { id } = req.params;
+      const admin_id = req.user?.id;
+      
+      if (!admin_id) {
+        return res.status(401).json({ error: 'Usuario no autenticado' });
+      }
+      
+      // Obtener conglomerado inactivo (sin filtro activo=true)
+      const { data: conglomerado } = await supabase
+        .from('conglomerados')
+        .select('*')
+        .eq('id', id)
+        .eq('activo', false)
+        .maybeSingle();
+      
+      if (!conglomerado) {
+        return res.status(404).json({ 
+          error: 'Conglomerado no encontrado o ya está activo' 
+        });
+      }
+      
+      const resultado = await ConglomeradosModel.reactivar(id);
+      
+      res.json({ 
+        message: 'Conglomerado reactivado exitosamente',
+        conglomerado: resultado
+      });
+    } catch (error) {
+      console.error('Error en reactivar:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
   static async asignarACoordinador(req, res) {
     try {
       const { coord_id, cantidad, plazo_dias } = req.body;
@@ -115,7 +260,7 @@ class ConglomeradosController {
         return res.status(401).json({ error: 'Usuario no autenticado' });
       }
 
-      // ✅ VALIDACIÓN CRÍTICA: No auto-asignarse
+      
       if (super_admin_id === coord_id) {
         return res.status(403).json({ 
           error: 'No puedes asignarte conglomerados a ti mismo',

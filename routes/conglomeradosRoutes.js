@@ -4,58 +4,141 @@ import ConglomeradosController from '../controllers/conglomeradosController.js';
 import { 
   verificarToken, 
   verificarAdmin, 
-  verificarSuperAdmin,
-  verificarCoordGeoref 
+  verificarSuperAdmin 
 } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
+router.get('/test-stats', async (req, res) => {
+  console.log('🧪 Test stats llamado');
+  try {
+    const result = await ConglomeradosModel.getEstadisticas();
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
+// RUTAS PÚBLICAS (sin auth)
+// ============================================
 router.get('/clima/obtener', ConglomeradosController.obtenerClima);
-// Generar batch inicial de 1500
-router.post('/generar-batch', verificarToken, verificarAdmin, ConglomeradosController.generarBatch
+
+// ============================================
+// RUTAS ESPECÍFICAS (PRIMERO - más específicas)
+// ============================================
+
+// Estadísticas generales
+router.get('/estadisticas', 
+  verificarToken, 
+  ConglomeradosController.getEstadisticas
 );
-//  Asignar lote a coordinador
-router.post('/asignar-a-coordinador',verificarToken,verificarAdmin,ConglomeradosController.asignarACoordinador
-);
-// Ver conglomerados vencidos
+
+// ✅ NUEVO: Stats de coordinador (para tabla)
+//router.get('/stats-coordinador/:coord_id',
+//  (verificarToken),
+ // verificarSuperAdmin,
+// ConglomeradosController.getStatsCoordinador
+//);
+
+// Conglomerados vencidos (solo super_admin)
 router.get('/vencidos',
   verificarToken,
-  verificarAdmin,
+  verificarSuperAdmin,
   ConglomeradosController.getVencidos
 );
-// Ver mis conglomerados asignados
-router.get('/mis-asignados',verificarToken,ConglomeradosController.getMisAsignados
-);
-// Aprobar conglomerado
-router.post('/:id/aprobar', verificarToken, ConglomeradosController.aprobar
-);
-// Rechazar conglomerado
-router.post('/:id/rechazar', verificarToken, ConglomeradosController.rechazar
-);
-// Obtener por municipio
-router.get('/municipio/:municipio_id',verificarToken,ConglomeradosController.getByMunicipio
-);
-//  Obtener por departamento
-router.get('/departamento/:departamento_id',verificarToken,ConglomeradosController.getByDepartamento
-);
-router.put('/:id/marcar-con-brigada',verificarToken,ConglomeradosController.marcarConBrigada
-);
-// Listar todos (paginado)
-router.get('/', verificarToken, ConglomeradosController.getAll
+
+// Mis asignados (coord_georef)
+router.get('/mis-asignados',
+  verificarToken,
+  ConglomeradosController.getMisAsignados
 );
 
-// Estadísticas
-router.get('/estadisticas', verificarToken, ConglomeradosController.getEstadisticas
+// Por municipio (para brigadas-service)
+router.get('/municipio/:municipio_id',
+  verificarToken,
+  ConglomeradosController.getByMunicipio
 );
 
-// Filtrar por estado
-router.get('/estado/:estado', verificarToken, ConglomeradosController.getByEstado
+// Por departamento (para brigadas-service)
+router.get('/departamento/:departamento_id',
+  verificarToken,
+  ConglomeradosController.getByDepartamento
 );
 
-// Ver uno específico
-router.get('/:id', verificarToken, ConglomeradosController.getById
+// Por estado
+router.get('/estado/:estado', 
+  verificarToken, 
+  ConglomeradosController.getByEstado
 );
-router.put('/:id', verificarToken, verificarAdmin, ConglomeradosController.update
+
+// ============================================
+// RUTAS POST/PUT/DELETE CON VALIDACIÓN
+// ============================================
+
+// Generar batch (solo super_admin)
+router.post('/generar-batch', 
+  verificarToken, 
+  verificarSuperAdmin, 
+  ConglomeradosController.generarBatch
 );
-router.delete('/:id', verificarToken, verificarAdmin, ConglomeradosController.delete
+
+// Asignar lote (solo super_admin)
+router.post('/asignar-a-coordinador',
+  verificarToken,
+  verificarSuperAdmin,
+  ConglomeradosController.asignarACoordinador
 );
+
+// ============================================
+// RUTAS GENÉRICAS (AL FINAL)
+// ============================================
+
+// Listar todos (paginado) - ✅ ANTES de /:id
+router.get('/', 
+  verificarToken, 
+  ConglomeradosController.getAll
+);
+
+// Ver uno específico (SIEMPRE ÚLTIMO GET)
+router.get('/:id', 
+  verificarToken, 
+  ConglomeradosController.getById
+);
+
+// ============================================
+// OPERACIONES CON ID ESPECÍFICO
+// ============================================
+
+// Aprobar (coord_georef)
+router.post('/:id/aprobar', 
+  verificarToken, 
+  ConglomeradosController.aprobar
+);
+
+// Rechazar (coord_georef)
+router.post('/:id/rechazar', 
+  verificarToken, 
+  ConglomeradosController.rechazar
+);
+
+// Marcar con brigada (brigadas-service)
+router.put('/:id/marcar-con-brigada',
+  verificarToken,
+  ConglomeradosController.marcarConBrigada
+);
+
+// Actualizar (solo super_admin)
+router.put('/:id', 
+  verificarToken, 
+  verificarSuperAdmin, 
+  ConglomeradosController.update
+);
+
+// Eliminar (solo super_admin)
+router.delete('/:id', 
+  verificarToken, 
+  verificarSuperAdmin, 
+  ConglomeradosController.delete
+);
+
 export default router;
