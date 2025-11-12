@@ -79,25 +79,24 @@ static async create(conglomerado) {
   
 
   // Crear múltiples conglomerados
-  static async createBatch(conglomerados) {
-    const records = conglomerados.map(c => ({
-      codigo: c.codigo,
-      latitud: c.latitud,
-      longitud: c.longitud,
-      estado: c.estado || 'sin_asignar',
-      created_at: new Date().toISOString()
-    }));
+ static async createBatch(conglomerados) {
+  const records = conglomerados.map(c => ({
+    codigo: c.codigo,
+    latitud: c.latitud,
+    longitud: c.longitud,
+    estado: c.estado || 'sin_asignar'
+  }));
 
-    const { data, error } = await supabase
-      .from('conglomerados')
-      .insert(records)
-      .select();
-    
-    if (error) throw error;
-    return data || [];
-  }
+  const { data, error } = await supabase
+    .from('conglomerados')
+    .insert(records)
+    .select();
+  
+  if (error) throw error;
+  return data || [];
+}
 
-  // ✅ NUEVO: Asignar lote a coordinador (usa función PL/pgSQL)
+
   static async asignarLote(coord_id, cantidad, plazo_dias) {
     const { data, error } = await supabase.rpc('asignar_lote_conglomerados', {
       p_coord_id: coord_id,
@@ -133,7 +132,7 @@ static async create(conglomerado) {
     return true;
   }
 
-  // ✅ CORREGIDO: Aprobar con ubicación + asignación automática a coord_brigadas
+
   static async aprobar(id, coord_id, municipio_id, departamento_id, region_id) {
     const { data, error } = await supabase
       .from('conglomerados')
@@ -153,12 +152,12 @@ static async create(conglomerado) {
     return data;
   }
 
-  // ✅ CORREGIDO: Rechazar sin fecha_proxima_revision
+
   static async rechazar(id, razon, coord_id) {
     const { data, error } = await supabase
       .from('conglomerados')
       .update({
-        estado: 'rechazado_permanente',  // ✅ Solo permanente
+        estado: 'rechazado_permanente',  
         razon_rechazo: razon,
         modificado_por_admin_id: coord_id
       })
@@ -208,7 +207,7 @@ static async create(conglomerado) {
     };
   }
 
-  // ✅ NUEVO: Obtener conglomerados de un coordinador
+
   static async getByCoordinadorPaginado(coord_id, page = 1, limit = 20) {
     const offset = (page - 1) * limit;
     
@@ -231,7 +230,7 @@ static async create(conglomerado) {
     };
   }
 
-  // ✅ NUEVO: Conglomerados vencidos (para super_admin)
+
   static async getVencidos() {
     const { data, error } = await supabase
       .from('conglomerados')
@@ -255,7 +254,7 @@ static async create(conglomerado) {
     return count || 0;
   }
 
-  // ✅ NUEVO: Obtener por departamento (para coord_brigadas)
+
   static async getByDepartamento(departamento_id, estado = 'aprobado') {
     const { data, error } = await supabase
       .from('conglomerados')
@@ -269,7 +268,7 @@ static async create(conglomerado) {
     return data || [];
   }
 
-  // ✅ NUEVO: Obtener por municipio (prioridad para coord de municipio)
+
   static async getByMunicipio(municipio_id, estado = 'aprobado') {
     const { data, error } = await supabase
       .from('conglomerados')
@@ -283,7 +282,7 @@ static async create(conglomerado) {
     return data || [];
   }
 
-  // ✅ NUEVO: Obtener por asignación a coord_brigadas
+
   static async getByCoordBrigadas(coord_brigadas_id) {
     const { data, error } = await supabase
       .from('conglomerados')
@@ -296,22 +295,20 @@ static async create(conglomerado) {
     return data || [];
   }
 
-  // ✅ NUEVO: Asignar a coordinador de brigadas
-  static async asignarACoordBrigadas(id, coord_brigadas_id) {
-    const { data, error } = await supabase
-      .from('conglomerados')
-      .update({
-        asignado_coord_brigadas_id: coord_brigadas_id,
-        fecha_asignacion_brigadas: new Date().toISOString()
-      })
-      .eq('id', id)
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
-  }
 
+static async asignarACoordBrigadas(id, coord_brigadas_id) {
+  const { data, error } = await supabase
+    .from('conglomerados')
+    .update({
+      asignado_coord_brigadas_id: coord_brigadas_id
+    })
+    .eq('id', id)
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
   // Marcar como con brigada
   static async marcarConBrigada(id) {
     const { data, error } = await supabase
@@ -338,7 +335,7 @@ static async create(conglomerado) {
 
     estadisticas.total = Object.values(estadisticas).reduce((a, b) => a + b, 0);
 
-    // ✅ Agregar vencidos
+
     const vencidos = await this.getVencidos();
     estadisticas.vencidos = vencidos.length;
 
