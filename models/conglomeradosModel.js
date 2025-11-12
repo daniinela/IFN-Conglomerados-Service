@@ -61,23 +61,22 @@ class ConglomeradosModel {
     return data;
   }
 
-  static async create(conglomerado) {
-    const { data, error } = await supabase
-      .from('conglomerados')
-      .insert([{
-        codigo: conglomerado.codigo,
-        latitud: conglomerado.latitud,
-        longitud: conglomerado.longitud,
-        estado: conglomerado.estado || 'sin_asignar',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }])
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
-  }
+static async create(conglomerado) {
+  const { data, error } = await supabase
+    .from('conglomerados')
+    .insert([{
+      codigo: conglomerado.codigo,
+      latitud: conglomerado.latitud,
+      longitud: conglomerado.longitud,
+      estado: conglomerado.estado || 'sin_asignar'
+    }])
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+  
 
   // Crear múltiples conglomerados
   static async createBatch(conglomerados) {
@@ -86,8 +85,7 @@ class ConglomeradosModel {
       latitud: c.latitud,
       longitud: c.longitud,
       estado: c.estado || 'sin_asignar',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      created_at: new Date().toISOString()
     }));
 
     const { data, error } = await supabase
@@ -115,8 +113,7 @@ class ConglomeradosModel {
     const { data, error } = await supabase
       .from('conglomerados')
       .update({
-        ...updates,
-        updated_at: new Date().toISOString()
+        ...updates
       })
       .eq('id', id)
       .select()
@@ -146,8 +143,7 @@ class ConglomeradosModel {
         departamento_id,
         region_id,
         razon_rechazo: null,  // Limpiar rechazo
-        modificado_por_admin_id: coord_id,
-        updated_at: new Date().toISOString()
+        modificado_por_admin_id: coord_id
       })
       .eq('id', id)
       .select()
@@ -164,8 +160,7 @@ class ConglomeradosModel {
       .update({
         estado: 'rechazado_permanente',  // ✅ Solo permanente
         razon_rechazo: razon,
-        modificado_por_admin_id: coord_id,
-        updated_at: new Date().toISOString()
+        modificado_por_admin_id: coord_id
       })
       .eq('id', id)
       .select()
@@ -307,8 +302,7 @@ class ConglomeradosModel {
       .from('conglomerados')
       .update({
         asignado_coord_brigadas_id: coord_brigadas_id,
-        fecha_asignacion_brigadas: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        fecha_asignacion_brigadas: new Date().toISOString()
       })
       .eq('id', id)
       .select()
@@ -323,8 +317,7 @@ class ConglomeradosModel {
     const { data, error } = await supabase
       .from('conglomerados')
       .update({ 
-        tiene_brigada: true,
-        updated_at: new Date().toISOString()
+        tiene_brigada: true
       })
       .eq('id', id)
       .select()

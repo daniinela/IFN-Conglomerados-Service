@@ -616,7 +616,7 @@ class ConglomeradosController {
     }
   }
 
-  // ✅ NUEVO: Obtener por municipio (para brigadas-service)
+
   static async getByMunicipio(req, res) {
     try {
       const { municipio_id } = req.params;
@@ -628,7 +628,7 @@ class ConglomeradosController {
     }
   }
 
-  // ✅ NUEVO: Obtener por departamento (para brigadas-service)
+
   static async getByDepartamento(req, res) {
     try {
       const { departamento_id } = req.params;
@@ -640,7 +640,7 @@ class ConglomeradosController {
     }
   }
 
-  // ✅ NUEVO: Marcar conglomerado como con brigada
+
   static async marcarConBrigada(req, res) {
     try {
       const { id } = req.params;
