@@ -19,14 +19,28 @@ export function generateConglomeradoCode() {
   return code;
 }
 
+export function validarFormatoDMS(coordenada) {
+  const regex = /^-?\d{1,3}°\d{1,2}'\d{1,2}(\.\d{1,2})?''$/;
+  return regex.test(coordenada);
+}
+
 export function generateRandomCoordinates() {
-  const latitud = (Math.random() * (COLOMBIA_BOUNDS.latMax - COLOMBIA_BOUNDS.latMin) + COLOMBIA_BOUNDS.latMin).toFixed(6);
-  const longitud = (Math.random() * (COLOMBIA_BOUNDS.lonMax - COLOMBIA_BOUNDS.lonMin) + COLOMBIA_BOUNDS.lonMin).toFixed(6);
+  const lat = Math.random() * (COLOMBIA_BOUNDS.latMax - COLOMBIA_BOUNDS.latMin) + COLOMBIA_BOUNDS.latMin;
+  const lon = Math.random() * (COLOMBIA_BOUNDS.lonMax - COLOMBIA_BOUNDS.lonMin) + COLOMBIA_BOUNDS.lonMin;
   
   return {
-    latitud: parseFloat(latitud),
-    longitud: parseFloat(longitud)
+    latitud: decimalToDMS(lat, 'lat'),
+    longitud: decimalToDMS(lon, 'lon')
   };
+}
+
+function decimalToDMS(decimal, tipo) {
+  const abs = Math.abs(decimal);
+  const grados = Math.floor(abs);
+  const minutos = Math.floor((abs - grados) * 60);
+  const segundos = ((abs - grados - minutos/60) * 3600).toFixed(2);
+  
+  return `${grados}°${minutos}'${segundos}''`;
 }
 
 export function generarCoordenadasSubparcelas(latCentral, lonCentral) {

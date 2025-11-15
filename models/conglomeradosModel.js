@@ -1,5 +1,10 @@
 // conglomerados-service/models/conglomeradosModel.js
 import supabase from '../config/database.js';
+import axios from 'axios';
+
+const USUARIOS_SERVICE_URL = process.env.USUARIOS_SERVICE_URL || 'http://localhost:3001';
+const GEO_SERVICE_URL = process.env.GEO_SERVICE_URL || 'http://localhost:3004';
+const BRIGADAS_SERVICE_URL = process.env.BRIGADAS_SERVICE_URL || 'http://localhost:3003';
 
 class ConglomeradosModel {
   
@@ -77,6 +82,9 @@ class ConglomeradosModel {
         longitud: conglomerado.longitud,
         estado: 'en_revision',
         car_sigla: conglomerado.car_sigla || null,
+        municipio_id: conglomerado.municipio_id || null,
+        departamento_id: conglomerado.departamento_id || null,
+        region_id: conglomerado.region_id || null,
         activo: true
       }])
       .select()
@@ -93,6 +101,9 @@ class ConglomeradosModel {
       longitud: c.longitud,
       estado: 'en_revision',
       car_sigla: c.car_sigla || null,
+      municipio_id: c.municipio_id || null,
+      departamento_id: c.departamento_id || null,
+      region_id: c.region_id || null,
       activo: true
     }));
 
@@ -120,7 +131,23 @@ class ConglomeradosModel {
     return data;
   }
 
-  static async asignarAJefeBrigada(id, jefe_brigada_id) {
+  // Validar que el jefe de brigada existe antes de asignar
+  static async asignarAJefeBrigada(id, jefe_brigada_id, authHeader) {
+    // 1. Validar que el jefe de brigada existe y está aprobado
+    try {
+      const response = await axios.get(
+        `${USUARIOS_SERVICE_URL}/api/usuarios/${jefe_brigada_id}`,
+        { headers: { 'Authorization': authHeader } }
+      );
+      
+      if (!response.data || response.data.estado_aprobacion !== 'aprobado') {
+        throw new Error('El jefe de brigada no existe o no está aprobado');
+      }
+    } catch (err) {
+      throw new Error(`Error validando jefe de brigada: ${err.message}`);
+    }
+
+    // 2. Actualizar el conglomerado
     const { data, error } = await supabase
       .from('conglomerados')
       .update({ 
@@ -134,6 +161,24 @@ class ConglomeradosModel {
       .single();
 
     if (error) throw error;
+
+    // 3. Crear la brigada_expedicion automáticamente (Fase I.A.4)
+    try {
+      await axios.post(
+        `${BRIGADAS_SERVICE_URL}/api/brigadas`,
+        {
+          conglomerado_id: id,
+          jefe_brigada_id: jefe_brigada_id,
+          diligenciado_por_id: jefe_brigada_id
+        },
+        { headers: { 'Authorization': authHeader } }
+      );
+    } catch (err) {
+      console.error('Error creando brigada_expedicion:', err.message);
+      // En producción, aquí deberías revertir la asignación o usar un patrón de compensación
+      throw new Error(`Conglomerado asignado pero fallo al crear brigada: ${err.message}`);
+    }
+
     return data;
   }
 
@@ -168,6 +213,7 @@ class ConglomeradosModel {
     return data;
   }
 
+  //Filtrado por jefe de brigada para seguridad
   static async getByJefeBrigada(jefe_brigada_id) {
     const { data, error } = await supabase
       .from('conglomerados')
@@ -190,6 +236,35 @@ class ConglomeradosModel {
       .eq('estado', estado)
       .eq('activo', true)
       .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  }
+
+  //Filtrado por alcance geográfico (para el COORD_IFN)
+  static async getByAlcanceGeografico(filtros) {
+    let query = supabase
+      .from('conglomerados')
+      .select('*')
+      .eq('activo', true);
+    
+    if (filtros.region_id) {
+      query = query.eq('region_id', filtros.region_id);
+    }
+    
+    if (filtros.departamento_id) {
+      query = query.eq('departamento_id', filtros.departamento_id);
+    }
+    
+    if (filtros.municipio_id) {
+      query = query.eq('municipio_id', filtros.municipio_id);
+    }
+    
+    if (filtros.estado) {
+      query = query.eq('estado', filtros.estado);
+    }
+    
+    const { data, error } = await query.order('created_at', { ascending: false });
     
     if (error) throw error;
     return data || [];

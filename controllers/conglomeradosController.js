@@ -138,7 +138,8 @@ class ConglomeradosController {
 
       const conglomeradoAsignado = await ConglomeradosModel.asignarAJefeBrigada(
         id,
-        jefe_brigada_id
+        jefe_brigada_id,
+        req.headers.authorization
       );
 
       res.json({
