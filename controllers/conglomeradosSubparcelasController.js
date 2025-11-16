@@ -18,70 +18,18 @@ class ConglomeradosSubparcelasController {
   static async registrarEstablecimiento(req, res) {
     try {
       const { id } = req.params;
-      const { 
-        se_establecio,
-        latitud_establecida,
-        longitud_establecida,
-        error_gps_establecido,
-        razon_no_establecida,
-        observaciones
-      } = req.body;
+      const datos = req.body;
 
       const subparcela = await ConglomeradosSubparcelasModel.getById(id);
       if (!subparcela) {
         return res.status(404).json({ error: 'Subparcela no encontrada' });
       }
 
-      if (se_establecio === undefined) {
-        return res.status(400).json({ error: 'se_establecio es requerido' });
-      }
-
-      if (se_establecio) {
-        if (!latitud_establecida || !longitud_establecida || !error_gps_establecido) {
-          return res.status(400).json({ 
-            error: 'Si se estableció, latitud_establecida, longitud_establecida y error_gps_establecido son requeridos' 
-          });
-        }
-      } else {
-        if (!razon_no_establecida) {
-          return res.status(400).json({ 
-            error: 'Si no se estableció, razon_no_establecida es requerida (1, 2, 3 o 4)' 
-          });
-        }
-
-        const razonesValidas = ['1', '2', '3', '4'];
-        if (!razonesValidas.includes(razon_no_establecida)) {
-          return res.status(400).json({ 
-            error: 'razon_no_establecida debe ser 1, 2, 3 o 4' 
-          });
-        }
-      }
-
-      const subparcelaActualizada = await ConglomeradosSubparcelasModel.registrarEstablecimiento(
-        id,
-        {
-          se_establecio,
-          latitud_establecida,
-          longitud_establecida,
-          error_gps_establecido,
-          razon_no_establecida,
-          observaciones
-        }
-      );
-
-      // Verificar si todas las subparcelas están establecidas
-      const todasEstablecidas = await ConglomeradosSubparcelasModel.verificarTodasEstablecidas(
-        subparcela.conglomerado_id
-      );
-
-      if (todasEstablecidas) {
-        await ConglomeradosModel.cambiarEstado(subparcela.conglomerado_id, 'finalizado_campo');
-      }
-
+      const actualizado = await ConglomeradosSubparcelasModel.registrarEstablecimiento(id, datos);
+      
       res.json({
         message: 'Establecimiento registrado',
-        subparcela: subparcelaActualizada,
-        todas_establecidas: todasEstablecidas
+        subparcela: actualizado
       });
     } catch (error) {
       console.error('Error en registrarEstablecimiento:', error);
