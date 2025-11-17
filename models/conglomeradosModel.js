@@ -19,47 +19,82 @@ class ConglomeradosModel {
     return data || [];
   }
 
-  static async getAllPaginado(page = 1, limit = 20, busqueda = '') {
-    const offset = (page - 1) * limit;
-    
-    let query = supabase
-      .from('conglomerados')
-      .select('*', { count: 'exact' })
-      .eq('activo', true);
-    
-    if (busqueda && busqueda.trim() !== '') {
-      query = query.ilike('codigo', `%${busqueda}%`);
-    }
-    
-    const { data, error, count } = await query
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-    
-    if (error) throw error;
-    
-    return {
-      data: data || [],
-      total: count || 0,
-      page,
-      limit,
-      totalPages: Math.ceil((count || 0) / limit)
-    };
+ static async getAllPaginado(page = 1, limit = 20, busqueda = '') {
+  const offset = (page - 1) * limit;
+  
+  let query = supabase
+    .from('conglomerados')
+    .select(`
+      *,
+      conglomerados_subparcelas (
+        id,
+        subparcela_num,
+        latitud_prediligenciada,
+        longitud_prediligenciada,
+        se_establecio
+      )
+    `, { count: 'exact' })
+    .eq('activo', true);
+  
+  if (busqueda && busqueda.trim() !== '') {
+    query = query.ilike('codigo', `%${busqueda}%`);
   }
+  
+  const { data, error, count } = await query
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+  
+  if (error) {
+    console.error('❌ Error en getAllPaginado:', error);
+    throw error;
+  }
+  
+  return {
+    data: data || [],
+    total: count || 0,
+    page,
+    limit,
+    totalPages: Math.ceil((count || 0) / limit)
+  };
+}
 
-  static async getById(id) {
-    const { data, error } = await supabase
-      .from('conglomerados')
-      .select(`
-        *,
-        conglomerados_subparcelas (*)
-      `)
-      .eq('id', id)
-      .eq('activo', true)
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
+static async getById(id) {
+  const { data, error } = await supabase
+    .from('conglomerados')
+    .select(`
+      *,
+      conglomerados_subparcelas (
+        id,
+        conglomerado_id,
+        subparcela_num,
+        latitud_prediligenciada,
+        longitud_prediligenciada,
+        se_establecio,
+        latitud_establecida,
+        longitud_establecida,
+        error_gps_establecido,
+        razon_no_establecida,
+        observaciones,
+        created_at,
+        updated_at
+      )
+    `)
+    .eq('id', id)
+    .eq('activo', true)
+    .single(); // ⚠️ Cambiar de maybeSingle() a single()
+  
+  if (error) {
+    console.error('❌ Error en getById:', error);
+    throw error;
   }
+  
+  // Ordenar subparcelas por número
+  if (data && data.conglomerados_subparcelas) {
+    data.conglomerados_subparcelas.sort((a, b) => a.subparcela_num - b.subparcela_num);
+  }
+  
+  return data;
+}
 
   static async getByCodigo(codigo) {
     const { data, error } = await supabase
@@ -297,6 +332,85 @@ class ConglomeradosModel {
       .update({
         activo: false,
         razon_no_establecido: motivo,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  }
+
+  static async getVencidos() {
+    const { data, error } = await supabase
+      .from('conglomerados')
+      .select('*')
+      .eq('activo', true)
+      .lt('fecha_vencimiento', new Date().toISOString())
+      .order('fecha_vencimiento', { ascending: true });
+    
+    if (error) throw error;
+    return data || [];
+  }
+
+  static async getByCoordinador(coordinador_id) {
+    const { data, error } = await supabase
+      .from('conglomerados')
+      .select('*')
+      .eq('jefe_brigada_asignado_id', coordinador_id)
+      .eq('activo', true)
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  }
+
+  static async getByMunicipio(municipio_id) {
+    const { data, error } = await supabase
+      .from('conglomerados')
+      .select('*')
+      .eq('municipio_id', municipio_id)
+      .eq('activo', true)
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  }
+
+  static async getByDepartamento(departamento_id) {
+    const { data, error } = await supabase
+      .from('conglomerados')
+      .select('*')
+      .eq('departamento_id', departamento_id)
+      .eq('activo', true)
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  }
+
+  static async marcarConBrigada(id, brigada_id) {
+    const { data, error } = await supabase
+      .from('conglomerados')
+      .update({
+        brigada_expedicion_id: brigada_id,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  }
+
+  static async asignarACoordinador(id, coordinador_id) {
+    const { data, error } = await supabase
+      .from('conglomerados')
+      .update({
+        jefe_brigada_asignado_id: coordinador_id,
+        estado: 'listo_para_asignacion',
         updated_at: new Date().toISOString()
       })
       .eq('id', id)

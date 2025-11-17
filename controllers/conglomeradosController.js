@@ -199,6 +199,44 @@ class ConglomeradosController {
     }
   }
 
+  static async asignarAJefe(req, res) {
+    try {
+      const { id } = req.params;
+      const { jefe_brigada_id } = req.body;
+
+      if (!jefe_brigada_id) {
+        return res.status(400).json({ error: 'jefe_brigada_id requerido' });
+      }
+
+      const conglomerado = await ConglomeradosModel.getById(id);
+      if (!conglomerado) {
+        return res.status(404).json({ error: 'Conglomerado no encontrado' });
+      }
+
+      // Validar que está listo para asignación
+      if (conglomerado.estado !== 'listo_para_asignacion') {
+        return res.status(400).json({ 
+          error: 'El conglomerado debe estar en estado listo_para_asignacion',
+          estado_actual: conglomerado.estado
+        });
+      }
+
+      // Actualizar jefe_brigada_asignado_id y cambiar estado a asignado_a_jefe
+      const conglomeradoActualizado = await ConglomeradosModel.update(id, {
+        jefe_brigada_asignado_id,
+        estado: 'asignado_a_jefe'
+      });
+
+      res.status(201).json({
+        message: 'Conglomerado asignado a jefe de brigada',
+        conglomerado: conglomeradoActualizado
+      });
+    } catch (error) {
+      console.error('Error en asignarAJefe:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
   static async marcarNoEstablecido(req, res) {
     try {
       const { id } = req.params;
@@ -253,6 +291,142 @@ class ConglomeradosController {
       res.json(estadisticas);
     } catch (error) {
       console.error('Error en getEstadisticas:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async getVencidos(req, res) {
+    try {
+      const conglomerados = await ConglomeradosModel.getVencidos();
+      res.json(conglomerados);
+    } catch (error) {
+      console.error('Error en getVencidos:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async getMisAsignados(req, res) {
+    try {
+      const coord_id = req.user?.id;
+      if (!coord_id) {
+        return res.status(401).json({ error: 'Usuario no autenticado' });
+      }
+
+      const conglomerados = await ConglomeradosModel.getByCoordinador(coord_id);
+      res.json(conglomerados);
+    } catch (error) {
+      console.error('Error en getMisAsignados:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async getByMunicipio(req, res) {
+    try {
+      const { municipio_id } = req.params;
+      const conglomerados = await ConglomeradosModel.getByMunicipio(municipio_id);
+      res.json(conglomerados);
+    } catch (error) {
+      console.error('Error en getByMunicipio:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async getByDepartamento(req, res) {
+    try {
+      const { departamento_id } = req.params;
+      const conglomerados = await ConglomeradosModel.getByDepartamento(departamento_id);
+      res.json(conglomerados);
+    } catch (error) {
+      console.error('Error en getByDepartamento:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async marcarConBrigada(req, res) {
+    try {
+      const { id } = req.params;
+      const { brigada_id } = req.body;
+
+      if (!brigada_id) {
+        return res.status(400).json({ error: 'brigada_id requerido' });
+      }
+
+      const conglomerado = await ConglomeradosModel.getById(id);
+      if (!conglomerado) {
+        return res.status(404).json({ error: 'Conglomerado no encontrado' });
+      }
+
+      const conglomeradoActualizado = await ConglomeradosModel.marcarConBrigada(id, brigada_id);
+      res.json({
+        message: 'Conglomerado marcado con brigada',
+        conglomerado: conglomeradoActualizado
+      });
+    } catch (error) {
+      console.error('Error en marcarConBrigada:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async asignarACoordinador(req, res) {
+    try {
+      const { conglomerado_ids, coordinador_id } = req.body;
+
+      if (!conglomerado_ids || !Array.isArray(conglomerado_ids) || conglomerado_ids.length === 0) {
+        return res.status(400).json({ error: 'conglomerado_ids requerido (array)' });
+      }
+
+      if (!coordinador_id) {
+        return res.status(400).json({ error: 'coordinador_id requerido' });
+      }
+
+      const conglomeradosActualizados = await Promise.all(
+        conglomerado_ids.map(id => 
+          ConglomeradosModel.asignarACoordinador(id, coordinador_id)
+        )
+      );
+
+      res.json({
+        message: `${conglomeradosActualizados.length} conglomerados asignados`,
+        conglomerados: conglomeradosActualizados
+      });
+    } catch (error) {
+      console.error('Error en asignarACoordinador:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async update(req, res) {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+
+      const conglomerado = await ConglomeradosModel.getById(id);
+      if (!conglomerado) {
+        return res.status(404).json({ error: 'Conglomerado no encontrado' });
+      }
+
+      const conglomeradoActualizado = await ConglomeradosModel.update(id, updates);
+      res.json(conglomeradoActualizado);
+    } catch (error) {
+      console.error('Error en update:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async delete(req, res) {
+    try {
+      const { id } = req.params;
+      const { motivo } = req.body;
+
+      const conglomerado = await ConglomeradosModel.getById(id);
+      if (!conglomerado) {
+        return res.status(404).json({ error: 'Conglomerado no encontrado' });
+      }
+
+      await ConglomeradosModel.softDelete(id, motivo || 'Eliminado por COORD_IFN');
+      res.json({ message: 'Conglomerado eliminado' });
+    } catch (error) {
+      console.error('Error en delete:', error);
       res.status(500).json({ error: error.message });
     }
   }

@@ -8,12 +8,22 @@ import supabase from './config/database.js';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3003; // ✅ CAMBIO: 3003 en lugar de 3001
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-// HEALTH CHECK MEJORADO (con verificación de BD)
+// 🔍 Logger de requests para debugging
+app.use((req, res, next) => {
+  console.log(`📨 ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+// ==========================================
+// HEALTH CHECKS
+// ==========================================
+
 app.get('/health', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -49,19 +59,71 @@ app.get('/health/simple', (req, res) => {
   res.json({
     status: 'OK',
     service: 'conglomerados-service',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    port: PORT
   });
 });
 
-app.use('/api/conglomerados', conglomeradosRoutes);
+// ==========================================
+// RUTAS
+// ==========================================
 
-app.use((err, req, res, next) => {
-  console.error('Error global:', err);
-  res.status(500).json({ error: 'Error interno del servidor' });
+// ✅ CAMBIO: Montar las rutas en /api (no /api/conglomerados)
+// porque las rutas ya incluyen /conglomerados en conglomeradosRoutes.js
+app.use('/api', conglomeradosRoutes);
+
+// ==========================================
+// MANEJO DE ERRORES
+// ==========================================
+
+// Ruta no encontrada (404)
+app.use((req, res) => {
+  console.log('❌ 404 - Ruta no encontrada:', req.method, req.originalUrl);
+  res.status(404).json({ 
+    error: 'Ruta no encontrada',
+    path: req.originalUrl,
+    method: req.method,
+    available_routes: [
+      'GET /health',
+      'GET /health/simple',
+      'GET /api/conglomerados',
+      'GET /api/conglomerados/estadisticas',
+      'GET /api/conglomerados/:id',
+      'POST /api/conglomerados/generar-batch',
+      // ... más rutas
+    ]
+  });
 });
 
+// Error global handler
+app.use((err, req, res, next) => {
+  console.error('❌ Error global:', err);
+  res.status(500).json({ 
+    error: 'Error interno del servidor',
+    message: err.message,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+  });
+});
+
+// ==========================================
+// INICIAR SERVIDOR
+// ==========================================
+
 app.listen(PORT, () => {
-  console.log(`✅ Conglomerados Service corriendo en http://localhost:${PORT}`);
-  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+  console.log('\n================================================');
+  console.log('🚀 CONGLOMERADOS SERVICE INICIADO');
+  console.log('================================================');
+  console.log(`✅ Servidor: http://localhost:${PORT}`);
+  console.log(`🏥 Health Check: http://localhost:${PORT}/health`);
   console.log(`📊 Estadísticas: http://localhost:${PORT}/api/conglomerados/estadisticas`);
+  console.log(`🗺️  Endpoints disponibles en: http://localhost:${PORT}/api/conglomerados`);
+  console.log('================================================\n');
+  
+  // Verificar variables de entorno críticas
+  console.log('🔍 Verificando configuración:');
+  console.log('  SUPABASE_URL:', process.env.SUPABASE_URL ? '✅' : '❌');
+  console.log('  SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY ? '✅' : '❌');
+  console.log('  OPENWEATHER_API_KEY:', process.env.OPENWEATHER_API_KEY ? '✅' : '❌');
+  console.log('  USUARIOS_SERVICE_URL:', process.env.USUARIOS_SERVICE_URL || 'http://localhost:3001 (default)');
+  console.log('================================================\n');
 });
