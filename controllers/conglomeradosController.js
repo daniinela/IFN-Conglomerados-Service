@@ -395,23 +395,80 @@ class ConglomeradosController {
     }
   }
 
-  static async update(req, res) {
-    try {
-      const { id } = req.params;
-      const updates = req.body;
+static async update(req, res) {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
 
-      const conglomerado = await ConglomeradosModel.getById(id);
-      if (!conglomerado) {
-        return res.status(404).json({ error: 'Conglomerado no encontrado' });
-      }
+    console.log('📝 Datos recibidos para actualizar:', JSON.stringify(updates, null, 2));
 
-      const conglomeradoActualizado = await ConglomeradosModel.update(id, updates);
-      res.json(conglomeradoActualizado);
-    } catch (error) {
-      console.error('Error en update:', error);
-      res.status(500).json({ error: error.message });
+    const conglomerado = await ConglomeradosModel.getById(id);
+    if (!conglomerado) {
+      return res.status(404).json({ error: 'Conglomerado no encontrado' });
     }
+
+    // 🔧 VALIDACIÓN: car_sigla no puede exceder 50 caracteres
+    if (updates.car_sigla && updates.car_sigla.length > 50) {
+      return res.status(400).json({ 
+        error: 'car_sigla no puede exceder 50 caracteres',
+        valor_recibido: updates.car_sigla,
+        longitud: updates.car_sigla.length
+      });
+    }
+
+    // 🔧 SANITIZACIÓN: Truncar car_sigla si existe
+    if (updates.car_sigla) {
+      updates.car_sigla = updates.car_sigla.substring(0, 50).trim();
+    }
+
+    // 🔧 VALIDACIÓN: Coordenadas como strings (tu schema las tiene como VARCHAR)
+    if (updates.latitud) {
+      updates.latitud = String(updates.latitud);
+    }
+    if (updates.longitud) {
+      updates.longitud = String(updates.longitud);
+    }
+
+    // ⚡ LÓGICA DE NEGOCIO: Cambiar estado automáticamente
+    // Si el conglomerado está en revisión y se completa la ubicación,
+    // cambiarlo a "listo_para_asignacion"
+    const ubicacionCompleta = 
+      (updates.car_sigla || conglomerado.car_sigla) &&
+      (updates.region_id || conglomerado.region_id) &&
+      (updates.departamento_id || conglomerado.departamento_id) &&
+      (updates.municipio_id || conglomerado.municipio_id);
+
+    if (conglomerado.estado === 'en_revision' && ubicacionCompleta) {
+      updates.estado = 'listo_para_asignacion';
+      console.log('✅ Ubicación completa → Cambiando estado a listo_para_asignacion');
+    }
+
+    console.log('✅ Datos sanitizados y validados:', JSON.stringify(updates, null, 2));
+
+    const conglomeradoActualizado = await ConglomeradosModel.update(id, updates);
+    
+    res.json({
+      success: true,
+      message: updates.estado === 'listo_para_asignacion' 
+        ? 'Conglomerado actualizado y listo para asignación'
+        : 'Conglomerado actualizado exitosamente',
+      conglomerado: conglomeradoActualizado
+    });
+  } catch (error) {
+    console.error('❌ Error en update:', error);
+    
+    // 🔍 Error más descriptivo
+    if (error.code === '22001') {
+      return res.status(400).json({ 
+        error: 'Uno de los campos excede la longitud máxima permitida',
+        detalles: error.message,
+        codigo: error.code
+      });
+    }
+    
+    res.status(500).json({ error: error.message });
   }
+}
 
   static async delete(req, res) {
     try {
