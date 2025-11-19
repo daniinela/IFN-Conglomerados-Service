@@ -2,6 +2,7 @@
 import ConglomeradosModel from '../models/conglomeradosModel.js';
 import ConglomeradosSubparcelasModel from '../models/conglomeradosSubparcelasModel.js';
 import { generateConglomeradoCode, generateRandomCoordinates, generarCoordenadasSubparcelas } from '../utils/geoUtils.js';
+import axios from 'axios';
 
 class ConglomeradosController {
   
@@ -79,7 +80,6 @@ class ConglomeradosController {
 
         const insertados = await ConglomeradosModel.createBatch(lote);
         
-        // Generar 5 subparcelas por cada conglomerado
         for (const cong of insertados) {
           const subparcelas = generarCoordenadasSubparcelas(
             parseFloat(cong.latitud),
@@ -111,20 +111,21 @@ class ConglomeradosController {
     }
   }
 
-  static async asignarAJefeBrigada(req, res) {
+  // ✅ FUNCIÓN ÚNICA Y CORREGIDA PARA ASIGNAR A JEFE
+  static async asignarAJefe(req, res) {
     try {
       const { id } = req.params;
       const { jefe_brigada_id } = req.body;
       const coord_id = req.user?.id;
-
-      if (!coord_id) {
-        return res.status(401).json({ error: 'Usuario no autenticado' });
-      }
+      const token = req.headers.authorization;
 
       if (!jefe_brigada_id) {
         return res.status(400).json({ error: 'jefe_brigada_id requerido' });
       }
 
+      console.log('📋 Asignando conglomerado:', { id, jefe_brigada_id });
+
+      // Validar estado del conglomerado
       const conglomerado = await ConglomeradosModel.getById(id);
       if (!conglomerado) {
         return res.status(404).json({ error: 'Conglomerado no encontrado' });
@@ -132,22 +133,69 @@ class ConglomeradosController {
 
       if (conglomerado.estado !== 'listo_para_asignacion') {
         return res.status(400).json({ 
-          error: 'Solo se pueden asignar conglomerados en estado listo_para_asignacion'
+          error: 'El conglomerado debe estar en estado listo_para_asignacion',
+          estado_actual: conglomerado.estado
         });
       }
 
-      const conglomeradoAsignado = await ConglomeradosModel.asignarAJefeBrigada(
-        id,
-        jefe_brigada_id,
-        req.headers.authorization
-      );
-
-      res.json({
-        message: 'Conglomerado asignado exitosamente',
-        conglomerado: conglomeradoAsignado
+      // 1. Asignar jefe al conglomerado
+      const conglomeradoActualizado = await ConglomeradosModel.update(id, {
+        jefe_brigada_asignado_id: jefe_brigada_id,
+        estado: 'asignado_a_jefe',
+        fecha_asignacion: new Date().toISOString()
       });
+      
+      console.log('✅ Conglomerado asignado');
+
+      // 2. Crear brigada automáticamente
+      try {
+        const brigadaResponse = await axios.post(
+          `${process.env.BRIGADAS_SERVICE_URL || 'http://localhost:3005'}/api/brigadas`,
+          {
+            conglomerado_id: id,
+            jefe_brigada_id: jefe_brigada_id,
+            diligenciado_por_id: coord_id || jefe_brigada_id
+          },
+          { 
+            headers: { 
+              'Authorization': token,
+              'Content-Type': 'application/json'
+            } 
+          }
+        );
+        
+        console.log('✅ Brigada creada:', brigadaResponse.data.id);
+        
+        // 3. Actualizar conglomerado con brigada_expedicion_id
+        await ConglomeradosModel.update(id, {
+          brigada_expedicion_id: brigadaResponse.data.id
+        });
+        
+        res.json({
+          success: true,
+          message: 'Conglomerado asignado y brigada creada exitosamente',
+          conglomerado: conglomeradoActualizado,
+          brigada_id: brigadaResponse.data.id
+        });
+        
+      } catch (brigadaError) {
+        console.error('❌ Error creando brigada:', brigadaError.response?.data || brigadaError.message);
+        
+        // Revertir la asignación si falla la creación de brigada
+        await ConglomeradosModel.update(id, {
+          jefe_brigada_asignado_id: null,
+          estado: 'listo_para_asignacion',
+          fecha_asignacion: null
+        });
+        
+        return res.status(500).json({
+          error: 'Error al crear brigada. La asignación ha sido revertida.',
+          detalle: brigadaError.response?.data || brigadaError.message
+        });
+      }
+      
     } catch (error) {
-      console.error('Error en asignarAJefeBrigada:', error);
+      console.error('❌ Error en asignarAJefe:', error);
       res.status(500).json({ error: error.message });
     }
   }
@@ -195,44 +243,6 @@ class ConglomeradosController {
       res.json(conglomeradoActualizado);
     } catch (error) {
       console.error('Error en cambiarEstado:', error);
-      res.status(500).json({ error: error.message });
-    }
-  }
-
-  static async asignarAJefe(req, res) {
-    try {
-      const { id } = req.params;
-      const { jefe_brigada_id } = req.body;
-
-      if (!jefe_brigada_id) {
-        return res.status(400).json({ error: 'jefe_brigada_id requerido' });
-      }
-
-      const conglomerado = await ConglomeradosModel.getById(id);
-      if (!conglomerado) {
-        return res.status(404).json({ error: 'Conglomerado no encontrado' });
-      }
-
-      // Validar que está listo para asignación
-      if (conglomerado.estado !== 'listo_para_asignacion') {
-        return res.status(400).json({ 
-          error: 'El conglomerado debe estar en estado listo_para_asignacion',
-          estado_actual: conglomerado.estado
-        });
-      }
-
-      // Actualizar jefe_brigada_asignado_id y cambiar estado a asignado_a_jefe
-      const conglomeradoActualizado = await ConglomeradosModel.update(id, {
-        jefe_brigada_asignado_id,
-        estado: 'asignado_a_jefe'
-      });
-
-      res.status(201).json({
-        message: 'Conglomerado asignado a jefe de brigada',
-        conglomerado: conglomeradoActualizado
-      });
-    } catch (error) {
-      console.error('Error en asignarAJefe:', error);
       res.status(500).json({ error: error.message });
     }
   }
@@ -395,80 +405,58 @@ class ConglomeradosController {
     }
   }
 
-static async update(req, res) {
-  try {
-    const { id } = req.params;
-    const updates = req.body;
+  static async update(req, res) {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
 
-    console.log('📝 Datos recibidos para actualizar:', JSON.stringify(updates, null, 2));
+      console.log('📝 Datos recibidos para actualizar:', JSON.stringify(updates, null, 2));
 
-    const conglomerado = await ConglomeradosModel.getById(id);
-    if (!conglomerado) {
-      return res.status(404).json({ error: 'Conglomerado no encontrado' });
-    }
+      const conglomerado = await ConglomeradosModel.getById(id);
+      if (!conglomerado) {
+        return res.status(404).json({ error: 'Conglomerado no encontrado' });
+      }
 
-    // 🔧 VALIDACIÓN: car_sigla no puede exceder 50 caracteres
-    if (updates.car_sigla && updates.car_sigla.length > 50) {
-      return res.status(400).json({ 
-        error: 'car_sigla no puede exceder 50 caracteres',
-        valor_recibido: updates.car_sigla,
-        longitud: updates.car_sigla.length
+      if (conglomerado.estado === 'asignado_a_jefe' || conglomerado.jefe_brigada_asignado_id) {
+        return res.status(403).json({ 
+          error: 'No se puede editar un conglomerado que ya ha sido asignado a un jefe de brigada',
+          estado_actual: conglomerado.estado
+        });
+      }
+
+      if (updates.latitud) {
+        updates.latitud = String(updates.latitud);
+      }
+      if (updates.longitud) {
+        updates.longitud = String(updates.longitud);
+      }
+
+      const ubicacionCompleta = 
+        (updates.region_id || conglomerado.region_id) &&
+        (updates.departamento_id || conglomerado.departamento_id) &&
+        (updates.municipio_id || conglomerado.municipio_id);
+
+      if (conglomerado.estado === 'en_revision' && ubicacionCompleta) {
+        updates.estado = 'listo_para_asignacion';
+        console.log('✅ Ubicación completa → Cambiando estado a listo_para_asignacion');
+      }
+
+      console.log('✅ Datos sanitizados y validados:', JSON.stringify(updates, null, 2));
+
+      const conglomeradoActualizado = await ConglomeradosModel.update(id, updates);
+      
+      res.json({
+        success: true,
+        message: updates.estado === 'listo_para_asignacion' 
+          ? 'Conglomerado actualizado y listo para asignación'
+          : 'Conglomerado actualizado exitosamente',
+        conglomerado: conglomeradoActualizado
       });
+    } catch (error) {
+      console.error('❌ Error en update:', error);
+      res.status(500).json({ error: error.message });
     }
-
-    // 🔧 SANITIZACIÓN: Truncar car_sigla si existe
-    if (updates.car_sigla) {
-      updates.car_sigla = updates.car_sigla.substring(0, 50).trim();
-    }
-
-    // 🔧 VALIDACIÓN: Coordenadas como strings (tu schema las tiene como VARCHAR)
-    if (updates.latitud) {
-      updates.latitud = String(updates.latitud);
-    }
-    if (updates.longitud) {
-      updates.longitud = String(updates.longitud);
-    }
-
-    // ⚡ LÓGICA DE NEGOCIO: Cambiar estado automáticamente
-    // Si el conglomerado está en revisión y se completa la ubicación,
-    // cambiarlo a "listo_para_asignacion"
-    const ubicacionCompleta = 
-      (updates.car_sigla || conglomerado.car_sigla) &&
-      (updates.region_id || conglomerado.region_id) &&
-      (updates.departamento_id || conglomerado.departamento_id) &&
-      (updates.municipio_id || conglomerado.municipio_id);
-
-    if (conglomerado.estado === 'en_revision' && ubicacionCompleta) {
-      updates.estado = 'listo_para_asignacion';
-      console.log('✅ Ubicación completa → Cambiando estado a listo_para_asignacion');
-    }
-
-    console.log('✅ Datos sanitizados y validados:', JSON.stringify(updates, null, 2));
-
-    const conglomeradoActualizado = await ConglomeradosModel.update(id, updates);
-    
-    res.json({
-      success: true,
-      message: updates.estado === 'listo_para_asignacion' 
-        ? 'Conglomerado actualizado y listo para asignación'
-        : 'Conglomerado actualizado exitosamente',
-      conglomerado: conglomeradoActualizado
-    });
-  } catch (error) {
-    console.error('❌ Error en update:', error);
-    
-    // 🔍 Error más descriptivo
-    if (error.code === '22001') {
-      return res.status(400).json({ 
-        error: 'Uno de los campos excede la longitud máxima permitida',
-        detalles: error.message,
-        codigo: error.code
-      });
-    }
-    
-    res.status(500).json({ error: error.message });
   }
-}
 
   static async delete(req, res) {
     try {
